@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Поднимаем PostgreSQL как сервис: тесты используют реальную БД.
+    # Порт 5433 -> 5432: тот же, что в docker-compose локально.
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: shortlink
+          POSTGRES_PASSWORD: shortlink
+          POSTGRES_DB: shortlink
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U shortlink"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        # Тестовая БД url_shortener_test создаётся и используется прямо в тестах.
+        run: npm test
+        env:
+          PGHOST: localhost
+          PGPORT: "5433"
+          PGUSER: shortlink
+          PGPASSWORD: shortlink
+          JWT_SECRET: ci-test-secret

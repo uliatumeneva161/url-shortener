@@ -1,5 +1,7 @@
 # 🔗 URL Shortener
 
+[![CI](https://github.com/uliatumeneva161/url-shortener/actions/workflows/ci.yml/badge.svg)](https://github.com/uliatumeneva161/url-shortener/actions)
+
 Сервис сокращения ссылок с аналитикой кликов. Бэкенд на **Node.js + TypeScript + Fastify**, данные в **PostgreSQL**, всё поднимается через **Docker Compose**.
 
 > Учебный пет-проект: от простого REST API к структуре, к которой подключаются тесты, миграции и аналитика. Код — с комментариями, готов к расширению (авторизация JWT, Redis-кеш, очереди).
@@ -120,8 +122,8 @@ url-shortener/
 ## Дорожная карта (что добавится)
 
 - [x] Авторизация: JWT + bcrypt — регистрация, вход, «мои ссылки».
+- [x] CI: GitHub Actions (typecheck + тесты на каждый push).
 - [ ] Refresh-токены, редактирование/удаление своих ссылок.
 - [ ] Redis: кеширование горячих ссылок, счётчики кликов.
 - [ ] BullMQ: запись кликов через очередь, чтобы редирект не ждал БД.
-- [ ] CI: GitHub Actions (typecheck + tests на каждый push).
 - [ ] Фронтенд на React (TypeScript).
