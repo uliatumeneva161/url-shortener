@@ -1,0 +1,26 @@
+{
+  "name": "url-shortener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "URL shortener: сокращённые ссылки, редирект 302, аналитика кликов",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "db:init": "tsx src/db-init.ts"
+  },
+  "dependencies": {
+    "fastify": "^5.6.1",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/pg": "^8.15.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.1",
+    "vitest": "^5.0.1"
+  }
+}
