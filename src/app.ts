@@ -1,6 +1,12 @@
 import Fastify from "fastify";
 import { db } from "./db.js";
 import { randomBytes } from "node:crypto";
+import {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  getUserIdFromAuthHeader,
+} from "./auth.js";
 
 // Алфавит для коротких кодов: URL-безопасные символы без неоднозначных.
 // Убрали 0/O, 1/l/I — чтобы ссылку легко было продиктовать голосом.
@@ -28,10 +34,82 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
+// Простейшая проверка вида email-a.
+function isEmail(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+  );
+}
+
 export function buildApp() {
   const app = Fastify({ logger: true });
 
+  // ---------- Авторизация ----------
+
+  // POST /auth/register  {email, password} -> 201 {id, email}
+  app.post("/auth/register", async (request, reply) => {
+    const body = (request.body ?? {}) as { email?: unknown; password?: unknown };
+
+    if (!isEmail(body.email)) {
+      return reply.code(400).send({ error: "email невалидный" });
+    }
+    if (typeof body.password !== "string" || body.password.length < 8) {
+      return reply.code(400).send({ error: "пароль должен быть не короче 8 символов" });
+    }
+
+    const email = body.email.trim().toLowerCase();
+    const passwordHash = await hashPassword(body.password);
+
+    try {
+      const result = await db.query(
+        "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
+        [email, passwordHash]
+      );
+      const user = result.rows[0];
+      return reply.code(201).send({ id: Number(user.id), email: user.email });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return reply.code(409).send({ error: "пользователь уже существует" });
+      }
+      throw err;
+    }
+  });
+
+  // POST /auth/login  {email, password} -> 200 {token, user}
+  app.post("/auth/login", async (request, reply) => {
+    const body = (request.body ?? {}) as { email?: unknown; password?: unknown };
+
+    if (!isEmail(body.email) || typeof body.password !== "string") {
+      return reply.code(400).send({ error: "неверный email или пароль" });
+    }
+
+    const email = body.email.trim().toLowerCase();
+    const result = await db.query(
+      "SELECT id, email, password_hash FROM users WHERE email = $1",
+      [email]
+    );
+    const user = result.rows[0] as
+      | { id: number; email: string; password_hash: string }
+      | undefined;
+
+    if (!user) {
+      return reply.code(401).send({ error: "неверный email или пароль" });
+    }
+
+    const ok = await verifyPassword(body.password, user.password_hash);
+    if (!ok) {
+      return reply.code(401).send({ error: "неверный email или пароль" });
+    }
+
+    return reply.send({ token: signToken(user.id), user: { id: user.id, email: user.email } });
+  });
+
+  // ---------- Основные маршруты ----------
+
   // POST /shorten  {url}  ->  201 {code, url, short_url}
+  // Если запрос с валидным токеном — ссылка привязывается к пользователю.
   app.post("/shorten", async (request, reply) => {
     const body = (request.body ?? {}) as { url?: unknown };
 
@@ -49,13 +127,15 @@ export function buildApp() {
       return reply.code(400).send({ error: "разрешены только http/https" });
     }
 
+    const userId = getUserIdFromAuthHeader(request.headers.authorization);
+
     // Пытаемся вставить. Если код совпал с существующим — генерируем новый.
     for (;;) {
       const code = generateCode();
       try {
         const result = await db.query(
-          "INSERT INTO links (code, url) VALUES ($1, $2) RETURNING id, code, url, created_at",
-          [code, body.url.trim()]
+          "INSERT INTO links (code, url, user_id) VALUES ($1, $2, $3) RETURNING id, code, url, created_at",
+          [code, body.url.trim(), userId]
         );
         const row = result.rows[0];
         return reply.code(201).send({
@@ -68,6 +148,26 @@ export function buildApp() {
         // COLLISION — повторяем цикл с новым кодом
       }
     }
+  });
+
+  // GET /links  ->  мои ссылки (требуется токен)
+  app.get("/links", async (request, reply) => {
+    const userId = getUserIdFromAuthHeader(request.headers.authorization);
+    if (userId === null) {
+      return reply.code(401).send({ error: "требуется авторизация" });
+    }
+
+    const result = await db.query(
+      `SELECT l.code, l.url, l.created_at,
+              COUNT(c.id)::int AS clicks
+       FROM links l
+       LEFT JOIN clicks c ON c.link_id = l.id
+       WHERE l.user_id = $1
+       GROUP BY l.id
+       ORDER BY l.created_at DESC`,
+      [userId]
+    );
+    return reply.send({ links: result.rows });
   });
 
   // GET /:code  ->  302 Redirect на оригинальный URL

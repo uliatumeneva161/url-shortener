@@ -11,6 +11,9 @@
 - **POST /shorten** — создаёт короткую ссылку по длинному URL (с валидацией).
 - **GET /:code** — редирект (302) на оригинальный URL.
 - **GET /links/:code/stats** — статистика: сколько раз открыли ссылку, последние клики с IP и User-Agent.
+- **POST /auth/register** — регистрация (email + пароль, bcrypt-хэш).
+- **POST /auth/login** — вход, выдача JWT-токена.
+- **GET /links** — «мои ссылки»: список ссылок пользователя со счётчиком кликов (под JWT).
 - Каждый клик записывается в БД — база для аналитики.
 - Миграции применяются автоматически при старте.
 - Интеграционные тесты на Vitest против отдельной тестовой БД.
@@ -22,6 +25,7 @@
 | Язык | TypeScript (strict) |
 | Фреймворк | Fastify |
 | БД | PostgreSQL 17 |
+| Авторизация | JWT (jsonwebtoken) + bcrypt (bcryptjs) |
 | Миграции | свои SQL-файлы (папка `migrations/`) |
 | Пул соединений | node-postgres (`pg`) |
 | Тесты | Vitest (`app.inject()`, без реального порта) |
@@ -60,6 +64,28 @@ curl -i http://localhost:3000/aB3dF9
 # Статистика по ссылке
 curl http://localhost:3000/links/aB3dF9/stats
 # → {"code":"aB3dF9","url":"...","total_clicks":2,"recent_clicks":[...]}
+
+# Регистрация
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"supersecret"}'
+# → 201 {"id":1,"email":"user@example.com"}
+
+# Вход -> JWT-токен
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"supersecret"}'
+# → 200 {"token":"eyJhbGciOi...","user":{"id":1,"email":"..."}}
+
+# Создать ссылку от имени пользователя
+curl -X POST http://localhost:3000/shorten \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <токен>" \
+  -d '{"url":"https://www.google.com"}'
+
+# Мои ссылки (со счётчиком кликов)
+curl -H "Authorization: Bearer <токен>" http://localhost:3000/links
+# → 200 {"links":[{"code":"aB3dF9","url":"...","clicks":2,...}]}
 ```
 
 ## Скрипты
@@ -77,10 +103,11 @@ curl http://localhost:3000/links/aB3dF9/stats
 ```
 url-shortener/
 ├── docker-compose.yml      # PostgreSQL в контейнере
-├── migrations/             # SQL-миграции (001...002)
+├── migrations/             # SQL-миграции (001...004)
 ├── src/
 │   ├── index.ts           # точка входа: миграции → listen
 │   ├── app.ts             # buildApp(): все маршруты
+│   ├── auth.ts            # bcrypt, JWT, извлечение пользователя
 │   ├── db.ts              # пул соединений + runMigrations()
 │   └── db-init.ts         # npm run db:init
 ├── test/
@@ -92,8 +119,9 @@ url-shortener/
 
 ## Дорожная карта (что добавится)
 
-- Авторизация: JWT (access + refresh), bcrypt — «мои ссылки».
-- Redis: кеширование горячих ссылок, счётчики кликов.
-- BullMQ: запись кликов через очередь, чтобы редирект не ждал БД.
-- CI: GitHub Actions (typecheck + tests на каждый push).
-- Фронтенд на React (TypeScript).
+- [x] Авторизация: JWT + bcrypt — регистрация, вход, «мои ссылки».
+- [ ] Refresh-токены, редактирование/удаление своих ссылок.
+- [ ] Redis: кеширование горячих ссылок, счётчики кликов.
+- [ ] BullMQ: запись кликов через очередь, чтобы редирект не ждал БД.
+- [ ] CI: GitHub Actions (typecheck + tests на каждый push).
+- [ ] Фронтенд на React (TypeScript).

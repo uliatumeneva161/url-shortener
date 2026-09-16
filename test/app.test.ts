@@ -36,7 +36,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Чистим таблицы перед каждым тестом, чтобы тесты не зависели друг от друга.
-  await db.query("TRUNCATE clicks, links RESTART IDENTITY CASCADE");
+  await db.query("TRUNCATE clicks, links, users RESTART IDENTITY CASCADE");
 });
 
 afterAll(async () => {
@@ -175,5 +175,152 @@ describe("GET /links/:code/stats", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("POST /auth/register", () => {
+  it("регистрирует пользователя и возвращает 201", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "ana@example.com", password: "password123" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.email).toBe("ana@example.com");
+    expect(body.id).toBeTypeOf("number");
+    // Пароль наружу не попадает
+    expect(body.password_hash).toBeUndefined();
+  });
+
+  it("возвращает 400 для невалидного email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "not-an-email", password: "password123" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("email невалидный");
+  });
+
+  it("возвращает 400 для короткого пароля", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "ana@example.com", password: "short" },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("возвращает 409, если пользователь уже существует", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "dup@example.com", password: "password123" },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "dup@example.com", password: "password456" },
+    });
+
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe("POST /auth/login", () => {
+  it("возвращает token при верном пароле", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "login@example.com", password: "password123" },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: "login@example.com", password: "password123" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.token).toBeTypeOf("string");
+    expect(body.token.split(".")).toHaveLength(3); // header.payload.signature
+    expect(body.user.email).toBe("login@example.com");
+  });
+
+  it("возвращает 401 при неверном пароле", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "login2@example.com", password: "password123" },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: "login2@example.com", password: "wrong-pass" },
+    });
+
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("GET /links (мои ссылки)", () => {
+  it("требует авторизацию (401 без токена)", async () => {
+    const res = await app.inject({ method: "GET", url: "/links" });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("возвращает только ссылки этого пользователя", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "owner@example.com", password: "password123" },
+    });
+    const login = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email: "owner@example.com", password: "password123" },
+    });
+    const token = login.json().token as string;
+
+    // Создаём ссылку от имени пользователя
+    const created = await app.inject({
+      method: "POST",
+      url: "/shorten",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { url: "https://owner.example.com" },
+    });
+    expect(created.statusCode).toBe(201);
+    const myCode = created.json().code as string;
+
+    // Чужая ссылка — без токена
+    const other = await app.inject({
+      method: "POST",
+      url: "/shorten",
+      payload: { url: "https://other.example.com" },
+    });
+    const otherCode = other.json().code as string;
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/links",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.links).toBeTypeOf("object");
+    expect(body.links.length).toBe(1);
+    expect(body.links[0].code).toBe(myCode);
+    expect(body.links[0].url).toBe("https://owner.example.com");
+    expect(body.links[0].clicks).toBe(0);
+
+    // Чужой ссылки в списке нет
+    const codes = body.links.map((l: { code: string }) => l.code);
+    expect(codes).not.toContain(otherCode);
   });
 });
