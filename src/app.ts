@@ -167,7 +167,14 @@ export function buildApp() {
        ORDER BY l.created_at DESC`,
       [userId]
     );
-    return reply.send({ links: result.rows });
+    const links = result.rows.map((row) => ({
+      code: row.code,
+      url: row.url,
+      created_at: row.created_at,
+      clicks: row.clicks,
+      short_url: `${request.protocol}://${request.headers.host}/${row.code}`,
+    }));
+    return reply.send({ links });
   });
 
   // GET /:code  ->  302 Redirect на оригинальный URL

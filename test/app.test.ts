@@ -318,6 +318,7 @@ describe("GET /links (мои ссылки)", () => {
     expect(body.links[0].code).toBe(myCode);
     expect(body.links[0].url).toBe("https://owner.example.com");
     expect(body.links[0].clicks).toBe(0);
+    expect(body.links[0].short_url).toContain(`/${body.links[0].code}`);
 
     // Чужой ссылки в списке нет
     const codes = body.links.map((l: { code: string }) => l.code);
