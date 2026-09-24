@@ -250,5 +250,25 @@ export function buildApp() {
     });
   });
 
+  app.delete("/links/:code", async (request, reply) => { 
+    
+    const { code } = request.params as { code?: string }
+    const userId = getUserIdFromAuthHeader(request.headers.authorization)
+
+    if (!userId) { 
+      return reply.code(401).send({ error: "not autorization"})
+    }
+    const delLink = await db.query(`DELETE FROM links WHERE code = $1 AND user_id = $2 RETURNING id, user_id`, [code, userId]) 
+    
+
+    if (delLink.rowCount === 0) { 
+      return reply.code(404).send({error: "no del link"})
+    }
+    return reply.code(200).send({deleted: code})
+    
+    
+
+  })
+
   return app;
 }

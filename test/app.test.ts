@@ -54,6 +54,12 @@ describe("POST /shorten", () => {
 
     expect(res.statusCode).toBe(201);
     const body = res.json();
+//  body   {
+//   code: 'XmiPsi',
+//   url: 'https://www.google.com',
+//   short_url: 'http://localhost:80/XmiPsi'
+// }
+
     expect(body.code).toMatch(/^[a-zA-Z2-9]{6}$/);
     expect(body.url).toBe("https://www.google.com");
     expect(body.short_url).toContain(`/${body.code}`);
@@ -286,7 +292,7 @@ describe("GET /links (мои ссылки)", () => {
       payload: { email: "owner@example.com", password: "password123" },
     });
     const token = login.json().token as string;
-
+    console.log("LOGIN", login.json())
     // Создаём ссылку от имени пользователя
     const created = await app.inject({
       method: "POST",
@@ -325,3 +331,83 @@ describe("GET /links (мои ссылки)", () => {
     expect(codes).not.toContain(otherCode);
   });
 });
+
+// 401 без токена — DELETE /links/любого_кода без заголовка → жди 401.
+// 404 на чужой/несуществующий — с токеном, код zzzzzz → жди 404.
+// 200 и реально удалено — с токеном свой код → жди 200; потом проверь, что повторный GET /links с тем же токеном эту ссылку больше не возвращает (вот это и есть «реально удалено», а не «сервер сказал»).
+
+describe("DELETE /links", () => { 
+  it("401 без токена — DELETE /links/:code", async() => {
+    const res =  await app.inject({
+      method: "DELETE",
+      url: "/links/zz",
+      headers: {}
+    })
+
+    expect(res.statusCode).toBe(401)
+  })
+
+  it("404 на чужой/несуществующий", async () => { 
+    await app.inject(
+      {
+        method: "POST", 
+        url: "/auth/register",
+        payload: { email:"owner@example.com", password: "owner@example.com"}
+      }
+
+    )
+    const login = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+       payload: { email: "owner@example.com", password: "owner@example.com" }
+    })
+    const token = login.json().token as string
+    const res = await app.inject({
+      method:"DELETE",
+      url: "/links/zzzz",
+      headers: {authorization: `Bearer ${token}`},
+    })
+
+    expect(res.statusCode).toBe(404)
+
+  })
+
+  it("200 и реально удалено", async () => { 
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {email: "jul11@mail.ru", password: "12345677"}
+    })
+    const login = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: {email: "jul11@mail.ru", password: "12345677"}
+    })
+    const token = login.json().token as string
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/shorten",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {url: "https://fff.com"}
+    })
+    const code = created.json().code as string
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: `/links/${code}`,
+      headers: {authorization : `Bearer ${token}`}
+    })
+    expect(res.statusCode).toBe(200)
+
+    const links = await app.inject({
+      method: "GET",
+      url: "/links",
+      headers: {authorization : `Bearer ${token}`}
+    })
+    const codes = links.json().links.map((l: { code: string }) => l.code)
+    
+    expect(codes).not.toContain(code)
+    
+  })
+})
