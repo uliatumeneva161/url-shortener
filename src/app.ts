@@ -7,6 +7,7 @@ import {
   signToken,
   getUserIdFromAuthHeader,
 } from "./auth.js";
+import { error } from "node:console";
 
 // Алфавит для коротких кодов: URL-безопасные символы без неоднозначных.
 // Убрали 0/O, 1/l/I — чтобы ссылку легко было продиктовать голосом.
@@ -258,17 +259,56 @@ export function buildApp() {
     if (!userId) { 
       return reply.code(401).send({ error: "not autorization"})
     }
+
     const delLink = await db.query(`DELETE FROM links WHERE code = $1 AND user_id = $2 RETURNING id, user_id`, [code, userId]) 
     
-
     if (delLink.rowCount === 0) { 
       return reply.code(404).send({error: "no del link"})
     }
+
     return reply.code(200).send({deleted: code})
-    
-    
 
   })
+
+  app.patch("/links/:code", async (request, reply) => { 
+    const userId = getUserIdFromAuthHeader(request.headers.authorization)
+    if (userId === null) { 
+      return reply.code(401).send({error: "401 err"})
+     }
+    
+    const code = (request.params as { code: string }).code
+    if (!code) { 
+      return reply.code(404).send({error: "404 err"})
+    }
+    const { url } = (request.body ?? {}) as { url?: unknown } 
+   
+    if (typeof url !== "string" || url.trim().length === 0) { 
+       return reply.code(400).send({ error: "url обязателен" })
+    }
+    let parsed: URL
+
+    try {
+      parsed = new URL(url.trim())
+
+    } catch { 
+      return reply.code(400).send({error: "невалидный url"})
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") { 
+       return reply.code(400).send({ error: "разрешены только http/https" })
+    }
+    const sql = await db.query("UPDATE links SET url=$1 WHERE code = $2 AND user_id = $3 RETURNING code, url, user_id", [url, code, userId])
+
+    if (sql.rowCount === 0) {
+       return reply.code(404).send({error: "link not found"})
+    }
+    const row = sql.rows[0]!
+        return reply.send({
+          code: row.code, url: row.url,
+          short_url: `${request.protocol}://${request.headers.host}/${row.code}`
+        }) 
+  })
+
 
   return app;
 }
