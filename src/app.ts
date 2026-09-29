@@ -7,7 +7,6 @@ import {
   signToken,
   getUserIdFromAuthHeader,
 } from "./auth.js";
-import { error } from "node:console";
 
 // Алфавит для коротких кодов: URL-безопасные символы без неоднозначных.
 // Убрали 0/O, 1/l/I — чтобы ссылку легко было продиктовать голосом.

@@ -31,7 +31,7 @@ export function clearToken(): void {
 
 async function request<T>(
   path: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE" | "PATCH",
   body?: unknown
 ): Promise<T> {
   const token = getToken();
@@ -77,3 +77,12 @@ export function myLinks(): Promise<{ links: MyLink[] }> {
 export function linkStats(code: string): Promise<StatsResponse> {
   return request(`/links/${code}/stats`, "GET");
 }
+
+export async function deleteLink(code: string,  url: string): Promise<void> {
+  return request<void>(`/links/${code}`, "DELETE", {url});
+}
+
+export function editLink(code: string, url: string): Promise<{ code: string; url: string }> { 
+  return request(`/links/${code}`, "PATCH", { url });
+}
+
