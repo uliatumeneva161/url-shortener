@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, deleteLink, linkStats, myLinks, editLink, pagination } from "../api/client";
+import { ApiError, deleteLink, linkStats, myLinks, editLink } from "../api/client";
 import type { MyLink, StatsResponse } from "../api/types";
 
 export default function MyLinks() {
@@ -28,31 +28,10 @@ export default function MyLinks() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  
-  // const paginatFront = async (l: string, o: string)=> { 
-  //   setLimitLiPage(prev => prev)
-  //   setCurrOffset(prev=>prev)
-  //   l = limitLiPage.toString()
-  //   o = offset.toString()
-  //   try {
-  //     await pagination(l, o)
-  //   } catch(e) { 
-  //     throw new Error(e instanceof ApiError ? e.message : "Не удалось перейти на страницу")
-  //   }
 
-  //   let btnsArr:number[] = []
-  //   const countBtns: number = Math.ceil(links.length / limitLiPage)
-   
-  //   for (let i = 1; i <= links.length; i++) { 
-  //     return btnsArr.push(i)
-  //   }
-  //   const pp = 222
-  //   return { countBtns, pp }
-  // }
-
-  const handleDelete = async (code: string, url: string) => {
+  const handleDelete = async (code: string) => {
     try {
-      await deleteLink(code, url);
+      await deleteLink(code);
       setLinks((prev) => prev.filter((l) => l.code !== code));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось удалить");
