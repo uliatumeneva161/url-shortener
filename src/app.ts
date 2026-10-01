@@ -130,7 +130,7 @@ export function buildApp() {
     const userId = getUserIdFromAuthHeader(request.headers.authorization);
 
     // Пытаемся вставить. Если код совпал с существующим — генерируем новый.
-    for (;;) {
+    for (; ;) {
       const code = generateCode();
       try {
         const result = await db.query(
@@ -156,7 +156,42 @@ export function buildApp() {
     if (userId === null) {
       return reply.code(401).send({ error: "требуется авторизация" });
     }
+    //
+    const { limit: limitRaw, offset: offsetRaw } = request.query as { limit?: string, offset?: string }
+    
+    let limit: number | null = null;
+    let offset: number | null = null;
 
+    if (limitRaw !== undefined) { 
+      limit = Number(limitRaw)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) { 
+        return reply.code(400).send({error: "limit должен быть целым числом от 1 до 100"})
+      }
+    }
+    if (offsetRaw !== undefined) { 
+      offset = Number(offsetRaw)
+      if (!Number.isInteger(offset) || offset< 0) { 
+        return reply.code(400).send({error: "offset должен быть целым числом от 0"})
+      }
+    }
+
+    const resultGetLinks = await db.query(`SELECT COUNT(*)::int AS total FROM links WHERE user_id=$1`, [userId])
+    const totalLinks = resultGetLinks.rows[0]?.total ?? 0
+
+    let params: number[] = [userId]
+    let sqlForParams: string = ""
+
+    if (limit !== null) { 
+      params.push(limit)
+      sqlForParams += ` LIMIT $${params.length}`
+    }
+    
+    if (offset !== null) { 
+      params.push(offset)
+      sqlForParams += ` OFFSET $${params.length}`
+    }
+  
+    //
     const result = await db.query(
       `SELECT l.code, l.url, l.created_at,
               COUNT(c.id)::int AS clicks
@@ -164,8 +199,8 @@ export function buildApp() {
        LEFT JOIN clicks c ON c.link_id = l.id
        WHERE l.user_id = $1
        GROUP BY l.id
-       ORDER BY l.created_at DESC`,
-      [userId]
+       ORDER BY l.created_at DESC ${sqlForParams}`,
+      params
     );
     const links = result.rows.map((row) => ({
       code: row.code,
@@ -174,7 +209,7 @@ export function buildApp() {
       clicks: row.clicks,
       short_url: `${request.protocol}://${request.headers.host}/${row.code}`,
     }));
-    return reply.send({ links });
+return reply.code(200).send({ links, totalLinks});
   });
 
   // GET /:code  ->  302 Redirect на оригинальный URL
@@ -250,64 +285,63 @@ export function buildApp() {
     });
   });
 
-  app.delete("/links/:code", async (request, reply) => { 
+  app.delete("/links/:code", async (request, reply) => {
     
     const { code } = request.params as { code?: string }
     const userId = getUserIdFromAuthHeader(request.headers.authorization)
 
-    if (!userId) { 
-      return reply.code(401).send({ error: "not autorization"})
+    if (!userId) {
+      return reply.code(401).send({ error: "not autorization" })
     }
 
-    const delLink = await db.query(`DELETE FROM links WHERE code = $1 AND user_id = $2 RETURNING id, user_id`, [code, userId]) 
+    const delLink = await db.query(`DELETE FROM links WHERE code = $1 AND user_id = $2 RETURNING id, user_id`, [code, userId])
     
-    if (delLink.rowCount === 0) { 
-      return reply.code(404).send({error: "no del link"})
+    if (delLink.rowCount === 0) {
+      return reply.code(404).send({ error: "no del link" })
     }
 
-    return reply.code(200).send({deleted: code})
+    return reply.code(200).send({ deleted: code })
 
   })
 
-  app.patch("/links/:code", async (request, reply) => { 
+  app.patch("/links/:code", async (request, reply) => {
     const userId = getUserIdFromAuthHeader(request.headers.authorization)
-    if (userId === null) { 
-      return reply.code(401).send({error: "401 err"})
-     }
+    if (userId === null) {
+      return reply.code(401).send({ error: "401 err" })
+    }
     
     const code = (request.params as { code: string }).code
-    if (!code) { 
-      return reply.code(404).send({error: "404 err"})
+    if (!code) {
+      return reply.code(404).send({ error: "404 err" })
     }
-    const { url } = (request.body ?? {}) as { url?: unknown } 
+    const { url } = (request.body ?? {}) as { url?: unknown }
    
-    if (typeof url !== "string" || url.trim().length === 0) { 
-       return reply.code(400).send({ error: "url обязателен" })
+    if (typeof url !== "string" || url.trim().length === 0) {
+      return reply.code(400).send({ error: "url обязателен" })
     }
     let parsed: URL
 
     try {
       parsed = new URL(url.trim())
 
-    } catch { 
-      return reply.code(400).send({error: "невалидный url"})
+    } catch {
+      return reply.code(400).send({ error: "невалидный url" })
     }
 
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") { 
-       return reply.code(400).send({ error: "разрешены только http/https" })
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return reply.code(400).send({ error: "разрешены только http/https" })
     }
     const sql = await db.query("UPDATE links SET url=$1 WHERE code = $2 AND user_id = $3 RETURNING code, url, user_id", [url, code, userId])
 
     if (sql.rowCount === 0) {
-       return reply.code(404).send({error: "link not found"})
+      return reply.code(404).send({ error: "link not found" })
     }
     const row = sql.rows[0]!
-        return reply.send({
-          code: row.code, url: row.url,
-          short_url: `${request.protocol}://${request.headers.host}/${row.code}`
-        }) 
+    return reply.send({
+      code: row.code, url: row.url,
+      short_url: `${request.protocol}://${request.headers.host}/${row.code}`
+    })
+
   })
-
-
-  return app;
+  return app
 }

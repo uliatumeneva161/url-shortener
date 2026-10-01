@@ -44,7 +44,9 @@ afterAll(async () => {
   await db.end();
 });
 
-// Хелпер: регистрирует пользователя и сразу логинит, возвращает токен.
+// ---------- Хелперы ----------
+
+// Регистрирует пользователя и логинит, возвращает токен.
 async function registerAndLogin(email: string, password: string): Promise<string> {
   await app.inject({
     method: "POST",
@@ -58,6 +60,31 @@ async function registerAndLogin(email: string, password: string): Promise<string
   });
   return login.json().token as string;
 }
+
+// Создаёт одну ссылку от имени пользователя, возвращает код.
+async function createLink(token: string, url: string): Promise<string> {
+  const res = await app.inject({
+    method: "POST",
+    url: "/shorten",
+    headers: { authorization: `Bearer ${token}` },
+    payload: { url },
+  });
+  if (res.statusCode !== 201) {
+    throw new Error(`Не удалось создать ссылку ${url}: ${res.statusCode}`);
+  }
+  return res.json().code as string;
+}
+
+// Создаёт несколько ссылок, возвращает массив кодов.
+async function createLinks(token: string, urls: string[]): Promise<string[]> {
+  const codes: string[] = [];
+  for (const url of urls) {
+    codes.push(await createLink(token, url));
+  }
+  return codes;
+}
+
+// ---------- POST /shorten ----------
 
 describe("POST /shorten", () => {
   it("возвращает 201 и короткую ссылку для валидного URL", async () => {
@@ -126,6 +153,8 @@ describe("POST /shorten", () => {
   });
 });
 
+// ---------- GET /:code ----------
+
 describe("GET /:code", () => {
   it("редиректит 302 на оригинальный URL", async () => {
     const created = await app.inject({
@@ -148,6 +177,8 @@ describe("GET /:code", () => {
     expect(res.json()).toEqual({ error: "Ссылка не найдена" });
   });
 });
+
+// ---------- GET /links/:code/stats ----------
 
 describe("GET /links/:code/stats", () => {
   it("показывает 0 кликов после создания ссылки", async () => {
@@ -193,6 +224,8 @@ describe("GET /links/:code/stats", () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+// ---------- POST /auth/register ----------
 
 describe("POST /auth/register", () => {
   it("регистрирует пользователя и возвращает 201", async () => {
@@ -246,6 +279,8 @@ describe("POST /auth/register", () => {
   });
 });
 
+// ---------- POST /auth/login ----------
+
 describe("POST /auth/login", () => {
   it("возвращает token при верном пароле", async () => {
     await app.inject({
@@ -282,6 +317,8 @@ describe("POST /auth/login", () => {
   });
 });
 
+// ---------- GET /links ----------
+
 describe("GET /links (мои ссылки)", () => {
   it("требует авторизацию (401 без токена)", async () => {
     const res = await app.inject({ method: "GET", url: "/links" });
@@ -292,23 +329,10 @@ describe("GET /links (мои ссылки)", () => {
   it("возвращает только ссылки этого пользователя", async () => {
     const token = await registerAndLogin("owner@example.com", "password123");
 
-    // Создаём ссылку от имени пользователя
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://owner.example.com" },
-    });
-    expect(created.statusCode).toBe(201);
-    const myCode = created.json().code as string;
-
-    // Чужая ссылка — без токена
-    const other = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      payload: { url: "https://other.example.com" },
-    });
-    const otherCode = other.json().code as string;
+    const myCode = await createLink(token, "https://owner.example.com");
+    // Чужая ссылка — от другого пользователя
+    const otherToken = await registerAndLogin("other@example.com", "password123");
+    const otherCode = await createLink(otherToken, "https://other.example.com");
 
     const res = await app.inject({
       method: "GET",
@@ -318,18 +342,67 @@ describe("GET /links (мои ссылки)", () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.links).toBeTypeOf("object");
-    expect(body.links.length).toBe(1);
+    expect(Array.isArray(body.links)).toBe(true);
+    expect(body.links).toHaveLength(1);
     expect(body.links[0].code).toBe(myCode);
     expect(body.links[0].url).toBe("https://owner.example.com");
     expect(body.links[0].clicks).toBe(0);
-    expect(body.links[0].short_url).toContain(`/${body.links[0].code}`);
+    expect(body.links[0].short_url).toContain(`/${myCode}`);
 
-    // Чужой ссылки в списке нет
     const codes = body.links.map((l: { code: string }) => l.code);
     expect(codes).not.toContain(otherCode);
   });
+
+  it("параметры: limit и offset", async () => {
+    const token = await registerAndLogin("owner@example.com", "password123");
+
+    // Создаём 5 ссылок
+    await createLinks(token, [
+      "https://example.com/1",
+      "https://example.com/2",
+      "https://example.com/3",
+      "https://example.com/4",
+      "https://example.com/5",
+    ]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/links?limit=3&offset=1",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.links).toHaveLength(3);
+    expect(body.totalLinks).toBe(5);
+  });
+
+  it("400 для невалидного limit", async () => {
+    const token = await registerAndLogin("owner@example.com", "password123");
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/links?limit=0",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("400 для невалидного offset", async () => {
+    const token = await registerAndLogin("owner@example.com", "password123");
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/links?offset=-1",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
 });
+
+// ---------- DELETE /links/:code ----------
 
 describe("DELETE /links", () => {
   it("401 без токена — DELETE /links/:code", async () => {
@@ -342,12 +415,12 @@ describe("DELETE /links", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("404 на чужой/несуществующий", async () => {
-    const token = await registerAndLogin("owner@example.com", "owner@example.com");
+  it("404 на несуществующий", async () => {
+    const token = await registerAndLogin("owner@example.com", "password123");
 
     const res = await app.inject({
       method: "DELETE",
-      url: "/links/zzzz",
+      url: "/links/zzzzzz",
       headers: { authorization: `Bearer ${token}` },
     });
 
@@ -355,15 +428,8 @@ describe("DELETE /links", () => {
   });
 
   it("200 и реально удалено", async () => {
-    const token = await registerAndLogin("jul11@mail.ru", "12345677");
-
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://fff.com" },
-    });
-    const code = created.json().code as string;
+    const token = await registerAndLogin("jul11@mail.ru", "12345678");
+    const code = await createLink(token, "https://fff.com");
 
     const res = await app.inject({
       method: "DELETE",
@@ -383,16 +449,12 @@ describe("DELETE /links", () => {
   });
 });
 
+// ---------- PATCH /links/:code ----------
+
 describe("PATCH /links/:code", () => {
   it("400 для невалидного url", async () => {
     const token = await registerAndLogin("bad@example.com", "password123");
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://original.com" },
-    });
-    const code = created.json().code;
+    const code = await createLink(token, "https://original.com");
 
     const res = await app.inject({
       method: "PATCH",
@@ -405,13 +467,7 @@ describe("PATCH /links/:code", () => {
 
   it("400 без url", async () => {
     const token = await registerAndLogin("bad2@example.com", "password123");
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://original.com" },
-    });
-    const code = created.json().code;
+    const code = await createLink(token, "https://original.com");
 
     const res = await app.inject({
       method: "PATCH",
@@ -424,13 +480,7 @@ describe("PATCH /links/:code", () => {
 
   it("400 для ftp", async () => {
     const token = await registerAndLogin("bad3@example.com", "password123");
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://original.com" },
-    });
-    const code = created.json().code;
+    const code = await createLink(token, "https://original.com");
 
     const res = await app.inject({
       method: "PATCH",
@@ -444,7 +494,7 @@ describe("PATCH /links/:code", () => {
   it("401 без токена — PATCH /links/любого_кода", async () => {
     const res = await app.inject({
       method: "PATCH",
-      url: "/links/zzzz",
+      url: "/links/zzzzzz",
       headers: {},
     });
 
@@ -464,40 +514,30 @@ describe("PATCH /links/:code", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("404 на чужой с ткн", async () => {
+  it("404 на чужой — с токеном", async () => {
     const token1 = await registerAndLogin("jjj@gmail.com", "888888888");
     const token2 = await registerAndLogin("jjj2@gmail.com", "8888888882");
 
-    const crLink2 = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      payload: { url: "https://l2.com" },
-      headers: { authorization: `Bearer ${token2}` },
-    });
-    const code2 = crLink2.json().code as string;
+    const code2 = await createLink(token2, "https://l2.com");
 
-    const patchAinB = await app.inject({
+    const res = await app.inject({
       method: "PATCH",
       url: `/links/${code2}`,
       headers: { authorization: `Bearer ${token1}` },
       payload: { url: "https://l9.com" },
     });
 
-    expect(patchAinB.statusCode).toBe(404);
+    expect(res.statusCode).toBe(404);
+
+    // Ссылка не должна была измениться
+    const redirect = await app.inject({ method: "GET", url: `/${code2}` });
+    expect(redirect.statusCode).toBe(302);
+    expect(redirect.headers.location).toBe("https://l2.com");
   });
 
-  it("200", async () => {
+  it("200 и url реально обновлён", async () => {
     const token = await registerAndLogin("jjj@gmail.com", "888888888");
-
-    const created = await app.inject({
-      method: "POST",
-      url: "/shorten",
-      headers: { authorization: `Bearer ${token}` },
-      payload: { url: "https://original.com" },
-    });
-    expect(created.statusCode).toBe(201);
-
-    const code = created.json().code as string;
+    const code = await createLink(token, "https://original.com");
 
     const res = await app.inject({
       method: "PATCH",
@@ -508,11 +548,8 @@ describe("PATCH /links/:code", () => {
 
     expect(res.statusCode).toBe(200);
 
-    const getQ = await app.inject({
-      method: "GET",
-      url: `/${code}`,
-    });
-    expect(getQ.statusCode).toBe(302);
-    expect(getQ.headers.location).toBe("https://aa.com");
+    const redirect = await app.inject({ method: "GET", url: `/${code}` });
+    expect(redirect.statusCode).toBe(302);
+    expect(redirect.headers.location).toBe("https://aa.com");
   });
 });

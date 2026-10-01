@@ -70,7 +70,8 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/login", "POST", { email, password });
 }
 
-export function myLinks(): Promise<{ links: MyLink[] }> {
+export async function myLinks(): Promise<{ links: MyLink[] }> {
+
   return request("/links", "GET");
 }
 
@@ -85,4 +86,3 @@ export async function deleteLink(code: string,  url: string): Promise<void> {
 export function editLink(code: string, url: string): Promise<{ code: string; url: string }> { 
   return request(`/links/${code}`, "PATCH", { url });
 }
-
