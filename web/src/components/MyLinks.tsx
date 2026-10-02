@@ -9,30 +9,35 @@ export default function MyLinks() {
   const [statsFor, setStatsFor] = useState<{ code: string; data: StatsResponse } | null>(null);
   const [editing, setEditing] = useState<{ code: string; url: string } | null>(null);
 
-  //paginat
-  // const [currPage, setCurrPage] = useState<number>(1)
-  // const [offset, setCurrOffset] = useState<number>(0)
-  // const [limitLiPage, setLimitLiPage] = useState<number>(2)
+  // Пагинация: храним номер страницы и размер; offset вычисляем по формуле
+  const [currPage, setCurrPage] = useState<number>(1);
+  const [limitLiPage] = useState<number>(2);
+  const [total, setTotal] = useState<number>(0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (page: number) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await myLinks();
+      const offset = (page - 1) * limitLiPage;
+      const res = await myLinks(limitLiPage, offset);
       setLinks(res.links);
+      setTotal(res.totalLinks);
+      setCurrPage(page);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось загрузить ссылки");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [limitLiPage]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(1); }, [refresh]);
 
   const handleDelete = async (code: string) => {
     try {
       await deleteLink(code);
-      setLinks((prev) => prev.filter((l) => l.code !== code));
+      // если удалили последнюю ссылку на странице — уходим на предыдущую
+      const nextPage = links.length === 1 && currPage > 1 ? currPage - 1 : currPage;
+      await refresh(nextPage);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Не удалось удалить");
     }
@@ -62,6 +67,10 @@ export default function MyLinks() {
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+  // Номера страниц [1..N] — рисуем кнопки через .map
+  const pageCount = Math.max(1, Math.ceil(total / limitLiPage));
+  const pages = Array.from({ length: pageCount }, (_, i) => i + 1);
 
   if (loading) return <p className="muted">Загружаем ваши ссылки...</p>;
 
@@ -137,12 +146,32 @@ export default function MyLinks() {
                     Статистика
                   </button>
                 </td>
+
               </tr>
             ))}
-              
-            
           </tbody>
         </table>
+      )}
+
+      {pageCount > 1 && (
+        <div className="pagination">
+          <button type="button" disabled={currPage === 1} onClick={() => void refresh(currPage - 1)}>
+            Назад
+          </button>
+          {pages.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={p === currPage ? "active" : ""}
+              onClick={() => void refresh(p)}
+            >
+              {p}
+            </button>
+          ))}
+          <button type="button" disabled={currPage === pageCount} onClick={() => void refresh(currPage + 1)}>
+            Вперёд
+          </button>
+        </div>
       )}
       
 

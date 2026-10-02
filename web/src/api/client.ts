@@ -70,9 +70,15 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/login", "POST", { email, password });
 }
 
-export async function myLinks(): Promise<{ links: MyLink[] }> {
-
-  return request("/links", "GET");
+export async function myLinks(
+  limit?: number,
+  offset?: number
+): Promise<{ links: MyLink[]; totalLinks: number }> {
+  const query = new URLSearchParams();
+  if (limit !== undefined) query.set("limit", String(limit));
+  if (offset !== undefined) query.set("offset", String(offset));
+  const suffix = query.toString();
+  return request(`/links${suffix ? `?${suffix}` : ""}`, "GET");
 }
 
 export function linkStats(code: string): Promise<StatsResponse> {

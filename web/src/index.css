@@ -205,6 +205,14 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
+.pagination {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .links-table th {
   color: var(--muted);
   font-weight: 600;
